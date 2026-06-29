@@ -20,7 +20,7 @@ Router (routers/) -> Schema (schemas/) -> Service (services/) -> Tools (tools/)
   - `tools/estoque/calc_diferencas_estoque.py` — Kardex x Razao de Estoque
 - `services/` — adapta JSON (list[dict]) <-> DataFrame e chama as `tools/`
   sem mudar o calculo. `analise_service.py` e `ia_service.py` sao a parte
-  **nova** (diagnostico determinístico + explicacao via Claude).
+  **nova** (diagnostico determinístico + explicacao via IA Smart Conciliações).
 - `routers/` — um por dominio + `/v1/analise/divergencia` (diagnostico).
 
 ## Autenticacao
@@ -56,7 +56,7 @@ diagnóstico cai no genérico "sem correspondência").
 O cálculo da causa (`diagnostico`) é **100% determinístico** — roda em
 Python puro, nunca passa pelo modelo. A `explicacao` em texto é opcional
 (`gerar_explicacao_ia`) e só formata o diagnóstico já calculado; sem
-`ANTHROPIC_API_KEY` configurada, devolve um texto-fallback (lista dos
+`OPENAI_API_KEY` configurada, devolve um texto-fallback (lista dos
 motivos) em vez de chamar a IA.
 
 Exemplo de payload (caso real "DEVOLUCAO DE COMPRA" sem matching):
@@ -102,5 +102,5 @@ uvicorn main:app --reload --port 8000   # dev local
 ```
 
 `Procfile` ja' configurado para o Railway (`web: uvicorn main:app --host 0.0.0.0 --port $PORT`).
-Configurar `API_KEY` e (opcional) `ANTHROPIC_API_KEY` nas variaveis de
+Configurar `API_KEY` e (opcional) `OPENAI_API_KEY` nas variaveis de
 ambiente do projeto no Railway.

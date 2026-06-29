@@ -15,10 +15,10 @@ class Settings(BaseSettings):
     # Autenticacao servico-a-servico (conciliacao-api chama esta API com esse header)
     API_KEY: str = ""
 
-    # IA (Claude) -- opcional. Sem chave, o diagnostico continua funcionando,
+    # IA -- opcional. Sem chave, o diagnostico continua funcionando,
     # so' nao gera a explicacao em linguagem natural (fica so' o estruturado).
-    ANTHROPIC_API_KEY: str = ""
-    ANTHROPIC_MODEL: str = "claude-sonnet-4-6"
+    OPENAI_API_KEY: str = ""
+    OPENAI_MODEL: str = "gpt-4o-mini"
 
     class Config:
         env_file = ".env"

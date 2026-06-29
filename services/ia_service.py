@@ -36,28 +36,30 @@ def _texto_fallback(diagnostico: DiagnosticoDivergencia, contexto: dict) -> str:
 
 
 def gerar_explicacao(diagnostico: DiagnosticoDivergencia, contexto: dict) -> str:
-    if not settings.ANTHROPIC_API_KEY:
+    if not settings.OPENAI_API_KEY:
         return _texto_fallback(diagnostico, contexto)
 
     try:
-        import anthropic
+        from openai import OpenAI
 
-        client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+        client = OpenAI(api_key=settings.OPENAI_API_KEY)
         payload = {
             "contexto": contexto,
             "motivos": [m.model_dump() for m in diagnostico.motivos],
             "valor_total_nao_conciliado_a": diagnostico.valor_total_nao_conciliado_a,
             "valor_total_nao_conciliado_b": diagnostico.valor_total_nao_conciliado_b,
         }
-        resposta = client.messages.create(
-            model=settings.ANTHROPIC_MODEL,
+        resposta = client.chat.completions.create(
+            model=settings.OPENAI_MODEL,
             max_tokens=600,
-            system=_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": str(payload)}],
+            messages=[
+                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "user", "content": str(payload)},
+            ],
         )
-        return "".join(
-            bloco.text for bloco in resposta.content if getattr(bloco, "type", "") == "text"
-        ).strip() or _texto_fallback(diagnostico, contexto)
+        return (resposta.choices[0].message.content or "").strip() or _texto_fallback(
+            diagnostico, contexto
+        )
     except Exception:
-        logger.exception("Falha ao gerar explicacao via Claude -- usando fallback determinístico")
+        logger.exception("Falha ao gerar explicacao via IA Smart Conciliações -- usando fallback determinístico")
         return _texto_fallback(diagnostico, contexto)
