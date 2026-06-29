@@ -244,6 +244,80 @@ def _diagnostico_estoque(registros_a: list[dict], registros_b: list[dict]) -> li
     ]
 
 
+def _extrair_nf_ct2_key(ct2_key: Any) -> str | None:
+    """Mesmo layout usado em tools/fiscal/match_ct2_sft.py::_extrair_chave_ct2: NF nas posicoes 4:13."""
+    chave = str(ct2_key or "").strip()
+    if len(chave) < 13:
+        return None
+    return _nf_normalizada(chave[4:13])
+
+
+def _diagnostico_impostos(
+    registros_a: list[dict], registros_b: list[dict], contexto: dict[str, Any],
+) -> list[MotivoDivergencia]:
+    campo_imposto = contexto.get("campo_imposto")
+
+    def _valor_sft(registro: dict) -> float:
+        if campo_imposto and registro.get(campo_imposto) not in (None, ""):
+            try:
+                return float(registro[campo_imposto])
+            except (TypeError, ValueError):
+                pass
+        for k, v in registro.items():
+            if k not in ("filial", "nf", "cliefor", "qtd_itens") and isinstance(v, (int, float)):
+                return float(v)
+        return 0.0
+
+    por_nf_b: dict[str, list[dict]] = {}
+    for r in registros_b:
+        nf = _nf_normalizada(r.get("nf"))
+        if nf:
+            por_nf_b.setdefault(nf, []).append(r)
+
+    grupos: dict[str, dict] = {}
+
+    def _registrar(causa: str, descricao: str, registro: dict, valor: float):
+        g = grupos.setdefault(causa, {"descricao": descricao, "registros": [], "valor": 0.0})
+        g["registros"].append(registro)
+        g["valor"] = round(g["valor"] + valor, 2)
+
+    for reg in registros_a:
+        valor = _valor_registro(reg)
+        nf = _extrair_nf_ct2_key(reg.get("ct2_key")) or _extrair_nf_historico(reg.get("historico", ""))
+
+        if not nf:
+            _registrar(
+                "sem_referencia_nf",
+                "Nao foi possivel identificar o numero da NF deste lancamento (sem CT2_KEY "
+                "valido e sem NF reconhecida no historico) -- revisao manual necessaria.",
+                reg, valor,
+            )
+            continue
+
+        candidatos = por_nf_b.get(nf, [])
+        if not candidatos:
+            _registrar(
+                "registro_ausente",
+                f"Nao ha nota {nf} no SFT (pode ter sido filtrada por tipo de movimento ou "
+                "exportacao na tela, ou realmente nao existe la).",
+                reg, valor,
+            )
+        else:
+            valor_sft = _valor_sft(candidatos[0])
+            _registrar(
+                "valor_divergente",
+                f"Existe a nota {nf} no SFT, mas o valor do imposto nao bate (razao="
+                f"{valor:.2f}, sft={valor_sft:.2f}) -- possivel CFOP/aliquota que nao gera "
+                "esse imposto, ou NF dividida em itens que nao reconciliou na soma.",
+                reg, valor,
+            )
+
+    return [
+        MotivoDivergencia(causa=c, descricao=g["descricao"], registros_afetados=g["registros"], valor_total_impactado=g["valor"])
+        for c, g in grupos.items()
+    ]
+
+
 def _diagnostico_generico(
     registros_a: list[dict], registros_b: list[dict], rotulo_a: str, rotulo_b: str,
 ) -> list[MotivoDivergencia]:
@@ -273,7 +347,9 @@ def diagnosticar(
     rotulo_b: str,
     config: dict[str, Any],
     candidatos_brutos_b: list[dict],
+    contexto: dict[str, Any] | None = None,
 ) -> DiagnosticoDivergencia:
+    contexto = contexto or {}
     if dominio == "fiscal" and candidatos_brutos_b:
         motivos = _diagnostico_fiscal(registros_nao_conciliados_a, candidatos_brutos_b, config)
     elif dominio == "financeiro":
@@ -282,6 +358,8 @@ def diagnosticar(
         motivos = _diagnostico_bancario(registros_nao_conciliados_a, registros_nao_conciliados_b)
     elif dominio == "estoque":
         motivos = _diagnostico_estoque(registros_nao_conciliados_a, registros_nao_conciliados_b)
+    elif dominio == "impostos":
+        motivos = _diagnostico_impostos(registros_nao_conciliados_a, registros_nao_conciliados_b, contexto)
     else:
         motivos = _diagnostico_generico(
             registros_nao_conciliados_a, registros_nao_conciliados_b, rotulo_a, rotulo_b,

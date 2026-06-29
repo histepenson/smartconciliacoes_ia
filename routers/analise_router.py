@@ -21,6 +21,7 @@ def analisar(req: AnalisarDivergenciaRequest):
         rotulo_b=req.rotulo_b,
         config=req.config,
         candidatos_brutos_b=req.candidatos_brutos_b,
+        contexto=req.contexto,
     )
 
     explicacao = None

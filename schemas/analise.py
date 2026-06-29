@@ -4,7 +4,7 @@ from pydantic import BaseModel
 
 
 class AnalisarDivergenciaRequest(BaseModel):
-    dominio: Literal["fiscal", "financeiro", "bancario", "estoque"]
+    dominio: Literal["fiscal", "financeiro", "bancario", "estoque", "impostos"]
 
     # Contexto livre para exibicao na explicacao (ex.: lp_codigo, descricao,
     # status, total_ct2, total_sft, diferenca -- o que o chamador ja tiver
