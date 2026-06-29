@@ -129,6 +129,121 @@ def _diagnostico_fiscal(
     ]
 
 
+_DESCRICOES_FINANCEIRO = {
+    "SO_FINANCEIRO": "Existe titulo no Financeiro para este codigo, mas nenhum lancamento "
+                      "correspondente foi encontrado no Razao Contabil.",
+    "SO_CONTABILIDADE": "Existe lancamento no Razao Contabil para este codigo, mas nenhum "
+                         "titulo correspondente foi encontrado no Financeiro.",
+    "DIVERGENTE_VALOR": "O codigo tem lancamentos nos dois lados, mas a soma dos valores nao coincide.",
+}
+
+
+def _diagnostico_financeiro(registros_a: list[dict]) -> list[MotivoDivergencia]:
+    motivos = []
+    for reg in registros_a:
+        causa = reg.get("tipo_diferenca") or "DIVERGENTE_VALOR"
+        valor = abs(float(reg.get("diferenca") or 0))
+        motivos.append(MotivoDivergencia(
+            causa=causa,
+            descricao=_DESCRICOES_FINANCEIRO.get(causa, "Divergencia nao classificada."),
+            registros_afetados=[reg],
+            valor_total_impactado=round(valor, 2),
+        ))
+    return motivos
+
+
+def _doc_key(registro: dict[str, Any]) -> str:
+    """Mesma normalizacao de tools/banco/calc_diferencas_banco.py::_normalizar_numero_documento."""
+    valor = registro.get("numero") or registro.get("documento_extraido") or registro.get("chave_documento") or ""
+    digitos = "".join(re.findall(r"\d+", str(valor)))
+    return digitos.lstrip("0") or "0"
+
+
+def _diagnostico_bancario(registros_a: list[dict], registros_b: list[dict]) -> list[MotivoDivergencia]:
+    por_doc_b: dict[str, list[dict]] = {}
+    for r in registros_b:
+        por_doc_b.setdefault(_doc_key(r), []).append(r)
+
+    grupos: dict[str, dict] = {}
+
+    def _registrar(causa: str, descricao: str, registro: dict, valor: float):
+        g = grupos.setdefault(causa, {"descricao": descricao, "registros": [], "valor": 0.0})
+        g["registros"].append(registro)
+        g["valor"] = round(g["valor"] + valor, 2)
+
+    for reg in registros_a:
+        valor = _valor_registro(reg)
+        chave = _doc_key(reg)
+        candidatos = por_doc_b.get(chave, []) if chave != "0" else []
+
+        if not candidatos:
+            _registrar(
+                "documento_ausente",
+                "Nao ha lancamento com o mesmo numero de documento do outro lado dentro do "
+                "periodo analisado.",
+                reg, valor,
+            )
+        else:
+            valor_candidato = _valor_registro(candidatos[0])
+            _registrar(
+                "valor_divergente",
+                "Existe lancamento com o mesmo numero de documento do outro lado, mas o valor "
+                f"diverge (lado A={valor:.2f}, lado B={valor_candidato:.2f}).",
+                reg, valor,
+            )
+
+    return [
+        MotivoDivergencia(causa=c, descricao=g["descricao"], registros_afetados=g["registros"], valor_total_impactado=g["valor"])
+        for c, g in grupos.items()
+    ]
+
+
+def _diagnostico_estoque(registros_a: list[dict], registros_b: list[dict]) -> list[MotivoDivergencia]:
+    grupos: dict[str, dict] = {}
+
+    def _registrar(causa: str, descricao: str, registro: dict, valor: float):
+        g = grupos.setdefault(causa, {"descricao": descricao, "registros": [], "valor": 0.0})
+        g["registros"].append(registro)
+        g["valor"] = round(g["valor"] + valor, 2)
+
+    for reg in registros_a:
+        data = str(reg.get("data") or "")
+        cf = str(reg.get("cf") or "")
+        valor = _valor_registro(reg)
+
+        mesmo_cf = [r for r in registros_b if str(r.get("cf") or "") == cf]
+        mesma_data = [r for r in registros_b if str(r.get("data") or "") == data]
+
+        if mesmo_cf and not mesma_data:
+            outra_data = mesmo_cf[0].get("data")
+            _registrar(
+                "data_divergente",
+                f"Existe registro do outro lado com o mesmo CF/movimento ({cf}), mas em data "
+                f"diferente ({data} vs {outra_data}).",
+                reg, valor,
+            )
+        elif mesma_data and not mesmo_cf:
+            outro_cf = mesma_data[0].get("cf")
+            _registrar(
+                "cf_divergente",
+                f"Existe registro do outro lado na mesma data ({data}), mas com CF/movimento "
+                f"diferente ({cf} vs {outro_cf}).",
+                reg, valor,
+            )
+        else:
+            _registrar(
+                "registro_ausente",
+                "Nao ha registro do outro lado com a mesma data nem o mesmo CF/movimento -- "
+                "lancamento provavelmente ausente de um dos lados.",
+                reg, valor,
+            )
+
+    return [
+        MotivoDivergencia(causa=c, descricao=g["descricao"], registros_afetados=g["registros"], valor_total_impactado=g["valor"])
+        for c, g in grupos.items()
+    ]
+
+
 def _diagnostico_generico(
     registros_a: list[dict], registros_b: list[dict], rotulo_a: str, rotulo_b: str,
 ) -> list[MotivoDivergencia]:
@@ -161,6 +276,12 @@ def diagnosticar(
 ) -> DiagnosticoDivergencia:
     if dominio == "fiscal" and candidatos_brutos_b:
         motivos = _diagnostico_fiscal(registros_nao_conciliados_a, candidatos_brutos_b, config)
+    elif dominio == "financeiro":
+        motivos = _diagnostico_financeiro(registros_nao_conciliados_a)
+    elif dominio == "bancario":
+        motivos = _diagnostico_bancario(registros_nao_conciliados_a, registros_nao_conciliados_b)
+    elif dominio == "estoque":
+        motivos = _diagnostico_estoque(registros_nao_conciliados_a, registros_nao_conciliados_b)
     else:
         motivos = _diagnostico_generico(
             registros_nao_conciliados_a, registros_nao_conciliados_b, rotulo_a, rotulo_b,

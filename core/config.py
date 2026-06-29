@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     API_KEY: str = ""
 
     # IA -- opcional. Sem chave, o diagnostico continua funcionando,
-    # so' nao gera a explicacao em linguagem natural (fica so' o estruturado).
+    # so' nao gera a explicacao em linguagem 9 (fica so' o estruturado).
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o-mini"
 
