@@ -90,13 +90,23 @@ Cada LP representa uma natureza contábil. O sistema usa o campo **CT2_LP** do r
 
 ## 5. Causas de divergência e como interpretar
 
-### `registro_ausente`
-A NF foi encontrada no histórico do CT2, mas **não existe no SFT** (ou não passou no filtro da carga/exportação).
+O diagnóstico gera um motivo **por nota** para as causas `so_ct2`, `so_sft` e `valor_divergente` — assim cada NF aparece individualmente, facilitando a localização do problema.
+
+### `so_ct2` — Só no CT2 (razão contábil)
+O lançamento CT2 tem uma NF no `historico`, mas ela **não existe no SFT** (ou não passou no filtro da carga/exportação do SFT).
 
 **Ações:**
 - Verificar se a NF existe no SFT dentro do período carregado
 - Confirmar o período da carga SFTENT (data_ini / data_fim)
 - Verificar se a nota foi exportada para o tipo de movimento correto (Entrada ou Saída)
+
+### `so_sft` — Só no SFT (livro fiscal)
+A nota existe no SFT e passou nos filtros do LP, mas **não tem lançamento CT2 correspondente**.
+
+**Ações:**
+- Verificar se a nota foi contabilizada no Protheus (integração contábil)
+- Confirmar o período da carga CT2RAZCT5 (data_ini / data_fim)
+- Verificar se o lote correto foi incluído na carga CT2
 
 ### `cfop_nao_configurado`
 A NF existe no SFT, mas o **CFOP dela não está na lista configurada para este LP**.

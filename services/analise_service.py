@@ -43,7 +43,13 @@ def _diagnostico_fiscal(
     registros_a: list[dict],
     candidatos_brutos_b: list[dict],
     config: dict[str, Any],
+    registros_b_so: list[dict] | None = None,
 ) -> list[MotivoDivergencia]:
+    """
+    registros_a         = registros CT2 que nao casaram (lado A = razao contabil)
+    candidatos_brutos_b = registros SFT sem filtro CFOP/TES (para lookup de NF)
+    registros_b_so      = registros SFT que nao casaram (lado B = livro fiscal)
+    """
     cfops_inc = {str(c).strip() for c in (config.get("cfops") or [])}
     cfops_exc = {str(c).strip() for c in (config.get("cfops_excluir") or [])}
     tes_inc = {str(t).strip() for t in (config.get("tes_codes") or [])}
@@ -57,25 +63,37 @@ def _diagnostico_fiscal(
         if nf:
             candidatos_por_nf.setdefault(nf, []).append(c)
 
-    grupos: dict[str, dict] = {}  # causa -> {descricao, registros, valor}
+    # grupos acumulam casos que NAO sao por-nota (cfop/tes/especie/valor_divergente)
+    grupos: dict[str, dict] = {}
 
-    def _registrar(causa: str, descricao: str, registro: dict, valor: float):
-        g = grupos.setdefault(causa, {"descricao": descricao, "registros": [], "valor": 0.0})
+    def _registrar_grupo(causa: str, descricao: str, registro: dict, valor: float):
+        g = grupos.setdefault(causa, {"descricao": descricao, "registros": [], "valor": 0.0, "nfs": []})
         g["registros"].append(registro)
         g["valor"] = round(g["valor"] + valor, 2)
+        nf_lbl = _extrair_nf_historico(registro.get("historico", ""))
+        if nf_lbl and nf_lbl not in g["nfs"]:
+            g["nfs"].append(nf_lbl)
+
+    motivos_por_nota: list[MotivoDivergencia] = []
 
     for reg in registros_a:
         nf = _extrair_nf_historico(reg.get("historico", ""))
         valor = _valor_registro(reg)
         candidatos = candidatos_por_nf.get(nf, []) if nf else []
+        nf_txt = f"NF {nf}" if nf else "NF nao identificada"
 
         if not candidatos:
-            _registrar(
-                "registro_ausente",
-                "Nao ha registro correspondente no outro lado (nota realmente nao existe la, "
-                "ou esta fora do periodo/filtro da carga).",
-                reg, valor,
-            )
+            # Cada nota CT2 sem par SFT vira motivo individual (lado A = CT2)
+            motivos_por_nota.append(MotivoDivergencia(
+                causa="so_ct2",
+                descricao=(
+                    f"{nf_txt}: lancamento presente no CT2 mas sem nota correspondente no SFT. "
+                    "Pode estar fora do periodo/filtro do SFT, ou a nota nao foi registrada "
+                    "no livro fiscal."
+                ),
+                registros_afetados=[reg],
+                valor_total_impactado=round(valor, 2),
+            ))
             continue
 
         candidato = candidatos[0]
@@ -91,42 +109,72 @@ def _diagnostico_fiscal(
         especie_excluida = bool(especies_exc) and any(e in especie for e in especies_exc)
 
         if cfop_fora or cfop_excluido:
-            _registrar(
+            _registrar_grupo(
                 "cfop_nao_configurado",
-                f"CFOP {cfop} nao esta na lista de CFOPs configurada para este LP/grupo "
+                f"CFOP {cfop} nao esta na lista de CFOPs configurada para este LP "
                 "(ou esta na lista de exclusao).",
                 reg, valor,
             )
         elif tes_fora or tes_excluido:
-            _registrar(
+            _registrar_grupo(
                 "tes_nao_configurado",
-                f"TES {tes} nao esta na lista de TES configurada para este LP/grupo "
+                f"TES {tes} nao esta na lista de TES configurada para este LP "
                 "(ou esta na lista de exclusao).",
                 reg, valor,
             )
         elif especie_fora or especie_excluida:
-            _registrar(
+            _registrar_grupo(
                 "especie_nao_configurada",
-                f"Especie {especie} nao esta na lista de especies configurada para este "
-                "LP/grupo (ou esta na lista de exclusao).",
+                f"Especie {especie} nao esta na lista configurada para este LP "
+                "(ou esta na lista de exclusao).",
                 reg, valor,
             )
         else:
             valor_candidato = _valor_registro(candidato)
-            _registrar(
-                "valor_divergente",
-                "O registro correspondente existe e passa nos filtros configurados, mas o "
-                f"valor diverge (lado A={valor:.2f}, lado B={valor_candidato:.2f}).",
-                reg, valor,
-            )
+            motivos_por_nota.append(MotivoDivergencia(
+                causa="valor_divergente",
+                descricao=(
+                    f"{nf_txt}: existe no CT2 e passa nos filtros, mas o valor nao bate "
+                    f"(CT2={valor:.2f}, SFT={valor_candidato:.2f})."
+                ),
+                registros_afetados=[reg],
+                valor_total_impactado=round(valor, 2),
+            ))
 
-    return [
-        MotivoDivergencia(
-            causa=causa, descricao=g["descricao"],
+    # Loop B: registros SFT sem par CT2 — cada nota vira motivo individual (lado B = SFT)
+    for reg in (registros_b_so or []):
+        nf = _nf_normalizada(reg.get("nf") or "")
+        nf_txt = f"NF {nf}" if nf else "NF nao identificada"
+        filial = reg.get("filial") or ""
+        cliefor = reg.get("cliefor") or ""
+        detalhe = ""
+        if filial:
+            detalhe += f" filial={filial}"
+        if cliefor:
+            detalhe += f" cli/for={cliefor}"
+        valor = _valor_registro(reg)
+        motivos_por_nota.append(MotivoDivergencia(
+            causa="so_sft",
+            descricao=(
+                f"{nf_txt}{detalhe}: presente no SFT mas sem lancamento correspondente no CT2. "
+                "A nota pode estar ausente da carga CT2 (periodo, lote, conta) ou ainda "
+                "nao foi contabilizada."
+            ),
+            registros_afetados=[reg],
+            valor_total_impactado=round(valor, 2),
+        ))
+
+    # Converte grupos acumulados (cfop/tes/especie) em motivos com lista de NFs
+    motivos_grupo: list[MotivoDivergencia] = []
+    for causa, g in grupos.items():
+        nfs_str = ", ".join(f"NF {n}" for n in g["nfs"]) if g["nfs"] else "NF nao identificada"
+        descricao = g["descricao"] + f" Nota(s) afetada(s): {nfs_str}."
+        motivos_grupo.append(MotivoDivergencia(
+            causa=causa, descricao=descricao,
             registros_afetados=g["registros"], valor_total_impactado=g["valor"],
-        )
-        for causa, g in grupos.items()
-    ]
+        ))
+
+    return motivos_grupo + motivos_por_nota
 
 
 _DESCRICOES_FINANCEIRO = {
@@ -503,8 +551,11 @@ def diagnosticar(
     contexto: dict[str, Any] | None = None,
 ) -> DiagnosticoDivergencia:
     contexto = contexto or {}
-    if dominio == "fiscal" and candidatos_brutos_b:
-        motivos = _diagnostico_fiscal(registros_nao_conciliados_a, candidatos_brutos_b, config)
+    if dominio == "fiscal" and (candidatos_brutos_b or registros_nao_conciliados_b):
+        motivos = _diagnostico_fiscal(
+            registros_nao_conciliados_a, candidatos_brutos_b or [], config,
+            registros_b_so=registros_nao_conciliados_b,
+        )
     elif dominio == "financeiro":
         motivos = _diagnostico_financeiro(registros_nao_conciliados_a)
     elif dominio == "bancario":
