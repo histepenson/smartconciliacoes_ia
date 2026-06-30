@@ -180,8 +180,8 @@ def _diagnostico_financeiro(registros_a: list[dict]) -> list[MotivoDivergencia]:
                 motivos.append(MotivoDivergencia(
                     causa="LANCADO_OUTRA_CONTA_CONTABIL",
                     descricao=(
-                        "O titulo existe no Financeiro, mas a CT2 mostra que foi contabilizado "
-                        f"em outra conta ({', '.join(contas)}), nao na conta analisada."
+                        "O titulo existe no Financeiro, mas a razão contábil mostra que foi "
+                        f"contabilizado em outra conta ({', '.join(contas)}), nao na conta analisada."
                     ),
                     registros_afetados=titulos_outra_conta,
                     valor_total_impactado=_valor_titulos(titulos_outra_conta),
@@ -191,9 +191,9 @@ def _diagnostico_financeiro(registros_a: list[dict]) -> list[MotivoDivergencia]:
                 motivos.append(MotivoDivergencia(
                     causa="NAO_CONTABILIZADO",
                     descricao=(
-                        "Busca na CT2 nao encontrou nenhum lancamento contabil para este "
-                        "titulo (em nenhuma conta) -- o titulo existe no Financeiro mas "
-                        "realmente nao foi contabilizado ainda."
+                        "Busca na razão contábil não encontrou nenhum lançamento para este "
+                        "título (em nenhuma conta) -- o título existe no Financeiro mas "
+                        "realmente não foi contabilizado ainda."
                     ),
                     registros_afetados=titulos_nao_contabilizados,
                     valor_total_impactado=_valor_titulos(titulos_nao_contabilizados),
@@ -357,8 +357,8 @@ def _diagnostico_impostos(
         if not nf:
             _registrar(
                 "sem_referencia_nf",
-                "Nao foi possivel identificar o numero da NF deste lancamento (sem CT2_KEY "
-                "valido e sem NF reconhecida no historico) -- revisao manual necessaria.",
+                "Não foi possível identificar o número da NF deste lançamento (sem chave da "
+                "razão contábil válida e sem NF reconhecida no histórico) -- revisão manual necessária.",
                 reg, valor,
             )
             continue
