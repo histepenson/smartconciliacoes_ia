@@ -155,7 +155,10 @@ def _diagnostico_financeiro(registros_a: list[dict]) -> list[MotivoDivergencia]:
         # - sem info (ct2_lancamento ausente): chave CT2 indisponivel (upload
         #   manual de Excel, ou titulo fora da janela de busca) -- cai no
         #   motivo generico de SO_FINANCEIRO, sem confirmar nem descartar.
-        titulos = reg.get("lancamentos_financeiro_detalhes") or []
+        # SO_FINANCEIRO popula lancamentos_financeiro_detalhes; DIVERGENTE_VALOR
+        # (e os demais tipos) populam registros_match_financeiro -- mesmo
+        # fallback usado no conciliacao-api/frontend pra montar a grid.
+        titulos = reg.get("lancamentos_financeiro_detalhes") or reg.get("registros_match_financeiro") or []
         titulos_outra_conta = []
         titulos_nao_contabilizados = []
         for t in titulos:
@@ -167,7 +170,7 @@ def _diagnostico_financeiro(registros_a: list[dict]) -> list[MotivoDivergencia]:
             elif not ct2.get("encontrado"):
                 titulos_nao_contabilizados.append(t)
 
-        if causa == "SO_FINANCEIRO" and (titulos_outra_conta or titulos_nao_contabilizados):
+        if causa in ("SO_FINANCEIRO", "DIVERGENTE_VALOR") and (titulos_outra_conta or titulos_nao_contabilizados):
             if titulos_outra_conta:
                 contas = sorted({
                     c
