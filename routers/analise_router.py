@@ -26,6 +26,7 @@ def analisar(req: AnalisarDivergenciaRequest):
 
     explicacao = None
     if req.gerar_explicacao_ia:
-        explicacao = ia_service.gerar_explicacao(diagnostico, req.contexto)
+        contexto_ia = {**req.contexto, "diagnostico_carga": req.diagnostico_carga} if req.diagnostico_carga else req.contexto
+        explicacao = ia_service.gerar_explicacao(diagnostico, contexto_ia, dominio=req.dominio)
 
     return {"diagnostico": diagnostico, "explicacao": explicacao}

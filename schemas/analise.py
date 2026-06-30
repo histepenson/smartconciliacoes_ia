@@ -31,6 +31,11 @@ class AnalisarDivergenciaRequest(BaseModel):
     # conjunto candidato por causa do CFOP X". Opcional.
     candidatos_brutos_b: list[dict[str, Any]] = []
 
+    # Estatisticas e parametros da carga CT2 -- detecta problemas estruturais
+    # (saldo errado, ct2_lp vazio, lote restrictivo) que causam total_ct2=0
+    # mesmo com registros presentes. Opcional.
+    diagnostico_carga: dict[str, Any] = {}
+
     gerar_explicacao_ia: bool = True
 
 
