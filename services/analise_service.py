@@ -146,6 +146,28 @@ def _valor_lancamentos(lancamentos: list[dict]) -> float:
     return round(sum(abs(float(l.get("valor") or 0)) for l in lancamentos), 2)
 
 
+def _documentos(registros: list[dict], *campos: str) -> list[str]:
+    """Lista deduplicada (preserva ordem) de documentos/identificadores de uma lista de registros."""
+    vistos: set[str] = set()
+    docs: list[str] = []
+    for r in registros:
+        for campo in campos:
+            valor = str(r.get(campo) or "").strip()
+            if valor:
+                if valor not in vistos:
+                    vistos.add(valor)
+                    docs.append(valor)
+                break
+    return docs
+
+
+def _referencia_titulos(registros: list[dict], *campos: str) -> str:
+    docs = _documentos(registros, *campos)
+    if docs:
+        return ", ".join(docs)
+    return f"{len(registros)} título(s) sem número identificado"
+
+
 def _diagnostico_financeiro(registros_a: list[dict]) -> list[MotivoDivergencia]:
     motivos = []
     for reg in registros_a:
@@ -181,23 +203,26 @@ def _diagnostico_financeiro(registros_a: list[dict]) -> list[MotivoDivergencia]:
                     for t in titulos_outra_conta
                     for c in (t.get("ct2_lancamento") or {}).get("contas_diferentes", [])
                 })
+                refs = _referencia_titulos(titulos_outra_conta, "documento")
                 motivos.append(MotivoDivergencia(
                     causa="LANCADO_OUTRA_CONTA_CONTABIL",
                     descricao=(
-                        "O titulo existe no Financeiro, mas a razão contábil mostra que foi "
-                        f"contabilizado em outra conta ({', '.join(contas)}), nao na conta analisada."
+                        f"O(s) título(s) {refs} existe(m) no Financeiro, mas a razão contábil "
+                        f"mostra que foi(ram) contabilizado(s) em outra conta ({', '.join(contas)}), "
+                        "não na conta analisada."
                     ),
                     registros_afetados=titulos_outra_conta,
                     valor_total_impactado=_valor_titulos(titulos_outra_conta),
                 ))
 
             if titulos_nao_contabilizados:
+                refs = _referencia_titulos(titulos_nao_contabilizados, "documento")
                 motivos.append(MotivoDivergencia(
                     causa="NAO_CONTABILIZADO",
                     descricao=(
-                        "Busca na razão contábil não encontrou nenhum lançamento para este "
-                        "título (em nenhuma conta) -- o título existe no Financeiro mas "
-                        "realmente não foi contabilizado ainda."
+                        f"Busca na razão contábil não encontrou nenhum lançamento (em nenhuma "
+                        f"conta) para o(s) título(s) {refs} -- existe(m) no Financeiro mas "
+                        "ainda não foi(ram) contabilizado(s)."
                     ),
                     registros_afetados=titulos_nao_contabilizados,
                     valor_total_impactado=_valor_titulos(titulos_nao_contabilizados),
