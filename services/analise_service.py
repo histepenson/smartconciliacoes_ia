@@ -142,6 +142,10 @@ def _valor_titulos(titulos: list[dict]) -> float:
     return round(sum(abs(float(t.get("valor") or 0)) for t in titulos), 2)
 
 
+def _valor_lancamentos(lancamentos: list[dict]) -> float:
+    return round(sum(abs(float(l.get("valor") or 0)) for l in lancamentos), 2)
+
+
 def _diagnostico_financeiro(registros_a: list[dict]) -> list[MotivoDivergencia]:
     motivos = []
     for reg in registros_a:
@@ -211,6 +215,61 @@ def _diagnostico_financeiro(registros_a: list[dict]) -> list[MotivoDivergencia]:
                     valor_total_impactado=valor_restante,
                 ))
             continue
+
+        # SO_CONTABILIDADE: processo inverso do SO_FINANCEIRO -- pra cada
+        # lancamento da razao sem titulo casado pelo matching normal, o
+        # conciliacao-api ja decodificou o ct2_key e procurou o titulo no
+        # financeiro (ver analise_diferencas_service.py::
+        # _buscar_titulo_financeiro_por_ct2_key). Dois desfechos uteis:
+        # - sem ct2_key: lancamento manual, nunca teve titulo
+        # - com ct2_key e titulo encontrado: titulo existe, so' nao casou pelo
+        #   criterio de data/valor
+        if causa == "SO_CONTABILIDADE":
+            lancamentos = reg.get("lancamentos_razao_detalhes") or []
+            lancamentos_manuais = [l for l in lancamentos if l.get("lancamento_manual")]
+            lancamentos_titulo_existe = [
+                l for l in lancamentos
+                if not l.get("lancamento_manual") and (l.get("titulo_financeiro") or {}).get("titulo_encontrado")
+            ]
+
+            if lancamentos_manuais or lancamentos_titulo_existe:
+                if lancamentos_manuais:
+                    motivos.append(MotivoDivergencia(
+                        causa="LANCAMENTO_MANUAL",
+                        descricao=(
+                            "O lançamento na razão contábil não tem chave de origem (CT2_KEY) -- "
+                            "foi um lançamento manual/direto, não gerado a partir de um título do "
+                            "Financeiro, então não há título correspondente a procurar."
+                        ),
+                        registros_afetados=lancamentos_manuais,
+                        valor_total_impactado=_valor_lancamentos(lancamentos_manuais),
+                    ))
+
+                if lancamentos_titulo_existe:
+                    motivos.append(MotivoDivergencia(
+                        causa="TITULO_EXISTE_FORA_DO_MATCH",
+                        descricao=(
+                            "O lançamento existe na razão contábil e o título financeiro que o "
+                            "originou realmente existe no Financeiro -- só não foi casado pelo "
+                            "critério automático de data/valor (provável diferença entre data de "
+                            "emissão e data de contabilização, ou tolerância de valor)."
+                        ),
+                        registros_afetados=lancamentos_titulo_existe,
+                        valor_total_impactado=_valor_lancamentos(lancamentos_titulo_existe),
+                    ))
+
+                valor_explicado = round(
+                    _valor_lancamentos(lancamentos_manuais) + _valor_lancamentos(lancamentos_titulo_existe), 2
+                )
+                valor_restante = round(valor - valor_explicado, 2)
+                if valor_restante > 0.01:
+                    motivos.append(MotivoDivergencia(
+                        causa=causa,
+                        descricao=_DESCRICOES_FINANCEIRO.get(causa, "Divergencia nao classificada."),
+                        registros_afetados=[reg],
+                        valor_total_impactado=valor_restante,
+                    ))
+                continue
 
         motivos.append(MotivoDivergencia(
             causa=causa,
