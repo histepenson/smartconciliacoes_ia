@@ -18,6 +18,7 @@ _KNOWLEDGE_DIR = Path(__file__).parent.parent / "knowledge"
 
 _KNOWLEDGE_FILES: dict[str, str] = {
     "fiscal": "pre_conferencia.md",
+    "nota_sft": "nota_sft.md",
 }
 
 
@@ -81,6 +82,71 @@ def _texto_fallback(diagnostico: DiagnosticoDivergencia, contexto: dict) -> str:
     if alertas:
         partes.insert(0, "ALERTA DA CARGA: " + " | ".join(alertas))
     return "Diagnostico:\n" + "\n".join(partes)
+
+
+def gerar_explicacao_nota(diagnostico: dict, contexto: dict) -> str:
+    """
+    Gera explicacao em linguagem natural para o diagnostico de uma nota SFT especifica
+    que nao casou com o CT2. Mais simples que gerar_explicacao: o diagnostico ja vem
+    estruturado pelo backend; a IA so' redige a explicacao final.
+    """
+    conhecimento = _carregar_conhecimento("nota_sft")
+    system_prompt = (
+        "Você é a IA Smart Conciliações. Explique, em português do Brasil correto e "
+        "totalmente acentuado, de forma objetiva e técnica, por que uma nota fiscal "
+        "específica não casou na pré-conferência CT2 × SFT. "
+        "Use APENAS as informações do diagnóstico recebido — nunca invente dados, lotes, "
+        "contas ou valores que não estejam no campo 'diagnostico'. "
+        "Seja extremamente conciso: no máximo 2 frases curtas. A primeira descreve a causa; "
+        "a segunda indica a ação recomendada."
+    )
+    if conhecimento:
+        system_prompt += (
+            "\n\n---\nBASE DE CONHECIMENTO:\n\n" + conhecimento
+        )
+
+    motivo = diagnostico.get("motivo", "")
+    alertas = diagnostico.get("alertas") or []
+    registros = diagnostico.get("registros") or []
+    params = diagnostico.get("parametros_carga") or {}
+
+    if not settings.OPENAI_API_KEY:
+        # Fallback deterministico
+        if motivo == "ausente_na_carga":
+            partes = [f"NF {contexto.get('nf')} nao encontrada na carga CT2 (lote={params.get('lote')})."]
+            if alertas:
+                partes.append(alertas[0])
+            return " ".join(partes)
+        if motivo == "encontrado_com_divergencia":
+            todos_probs = [p for r in registros for p in r.get("problemas", [])]
+            return f"NF encontrada na carga mas com divergencia: {'; '.join(todos_probs[:3]) or 'ver detalhes'}."
+        return diagnostico.get("descricao", "Sem informacao suficiente para diagnostico.")
+
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        payload = {
+            "contexto": contexto,
+            "diagnostico": {
+                "motivo": motivo,
+                "descricao": diagnostico.get("descricao"),
+                "alertas": alertas,
+                "registros": registros,
+                "parametros_carga": params,
+            },
+        }
+        resposta = client.chat.completions.create(
+            model=settings.OPENAI_MODEL,
+            max_tokens=300,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": str(payload)},
+            ],
+        )
+        return (resposta.choices[0].message.content or "").strip()
+    except Exception:
+        logger.exception("Falha ao gerar explicacao_nota via IA")
+        return diagnostico.get("descricao", "")
 
 
 def gerar_explicacao(diagnostico: DiagnosticoDivergencia, contexto: dict, dominio: str = "") -> str:

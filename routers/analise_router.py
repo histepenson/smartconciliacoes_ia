@@ -1,10 +1,22 @@
+from typing import Any
+
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 
 from middleware.auth import verificar_api_key
 from schemas.analise import AnalisarDivergenciaRequest, AnalisarDivergenciaResponse
 from services import analise_service, ia_service
 
 router = APIRouter(prefix="/v1/analise", tags=["Analise IA"], dependencies=[Depends(verificar_api_key)])
+
+
+class DiagnosticoNotaSftRequest(BaseModel):
+    nf: str
+    filial_sft: str = ""
+    cliefor_sft: str = ""
+    valor_sft: float = 0.0
+    carga_id_ct2: int | None = None
+    diagnostico: dict[str, Any] = {}
 
 
 @router.post(
@@ -30,3 +42,18 @@ def analisar(req: AnalisarDivergenciaRequest):
         explicacao = ia_service.gerar_explicacao(diagnostico, contexto_ia, dominio=req.dominio)
 
     return {"diagnostico": diagnostico, "explicacao": explicacao}
+
+
+@router.post(
+    "/nota-sft",
+    summary="Explicar por que uma nota SFT especifica nao casou com o CT2",
+)
+def diagnosticar_nota_sft(req: DiagnosticoNotaSftRequest):
+    explicacao = ia_service.gerar_explicacao_nota(req.diagnostico, {
+        "nf": req.nf,
+        "filial_sft": req.filial_sft,
+        "cliefor_sft": req.cliefor_sft,
+        "valor_sft": req.valor_sft,
+        "carga_id_ct2": req.carga_id_ct2,
+    })
+    return {"explicacao": explicacao}
