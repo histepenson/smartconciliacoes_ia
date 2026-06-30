@@ -138,11 +138,77 @@ _DESCRICOES_FINANCEIRO = {
 }
 
 
+def _valor_titulos(titulos: list[dict]) -> float:
+    return round(sum(abs(float(t.get("valor") or 0)) for t in titulos), 2)
+
+
 def _diagnostico_financeiro(registros_a: list[dict]) -> list[MotivoDivergencia]:
     motivos = []
     for reg in registros_a:
         causa = reg.get("tipo_diferenca") or "DIVERGENTE_VALOR"
         valor = abs(float(reg.get("diferenca") or 0))
+
+        # Titulos cuja chave CT2 foi buscada pelo conciliacao-api (ver
+        # ct2_lancamento_service.py). Tres desfechos possiveis:
+        # - achou em outra conta: foi contabilizado, so' nao na conta analisada
+        # - nao achou nada: o titulo realmente nao foi contabilizado em lugar nenhum
+        # - sem info (ct2_lancamento ausente): chave CT2 indisponivel (upload
+        #   manual de Excel, ou titulo fora da janela de busca) -- cai no
+        #   motivo generico de SO_FINANCEIRO, sem confirmar nem descartar.
+        titulos = reg.get("lancamentos_financeiro_detalhes") or []
+        titulos_outra_conta = []
+        titulos_nao_contabilizados = []
+        for t in titulos:
+            ct2 = t.get("ct2_lancamento")
+            if ct2 is None:
+                continue
+            if ct2.get("refletiu_em_outra_conta"):
+                titulos_outra_conta.append(t)
+            elif not ct2.get("encontrado"):
+                titulos_nao_contabilizados.append(t)
+
+        if causa == "SO_FINANCEIRO" and (titulos_outra_conta or titulos_nao_contabilizados):
+            if titulos_outra_conta:
+                contas = sorted({
+                    c
+                    for t in titulos_outra_conta
+                    for c in (t.get("ct2_lancamento") or {}).get("contas_diferentes", [])
+                })
+                motivos.append(MotivoDivergencia(
+                    causa="LANCADO_OUTRA_CONTA_CONTABIL",
+                    descricao=(
+                        "O titulo existe no Financeiro, mas a CT2 mostra que foi contabilizado "
+                        f"em outra conta ({', '.join(contas)}), nao na conta analisada."
+                    ),
+                    registros_afetados=titulos_outra_conta,
+                    valor_total_impactado=_valor_titulos(titulos_outra_conta),
+                ))
+
+            if titulos_nao_contabilizados:
+                motivos.append(MotivoDivergencia(
+                    causa="NAO_CONTABILIZADO",
+                    descricao=(
+                        "Busca na CT2 nao encontrou nenhum lancamento contabil para este "
+                        "titulo (em nenhuma conta) -- o titulo existe no Financeiro mas "
+                        "realmente nao foi contabilizado ainda."
+                    ),
+                    registros_afetados=titulos_nao_contabilizados,
+                    valor_total_impactado=_valor_titulos(titulos_nao_contabilizados),
+                ))
+
+            valor_explicado = round(
+                _valor_titulos(titulos_outra_conta) + _valor_titulos(titulos_nao_contabilizados), 2
+            )
+            valor_restante = round(valor - valor_explicado, 2)
+            if valor_restante > 0.01:
+                motivos.append(MotivoDivergencia(
+                    causa=causa,
+                    descricao=_DESCRICOES_FINANCEIRO.get(causa, "Divergencia nao classificada."),
+                    registros_afetados=[reg],
+                    valor_total_impactado=valor_restante,
+                ))
+            continue
+
         motivos.append(MotivoDivergencia(
             causa=causa,
             descricao=_DESCRICOES_FINANCEIRO.get(causa, "Divergencia nao classificada."),
