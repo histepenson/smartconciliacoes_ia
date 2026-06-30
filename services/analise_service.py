@@ -132,8 +132,8 @@ def _diagnostico_fiscal(
 _DESCRICOES_FINANCEIRO = {
     "SO_FINANCEIRO": "Existe titulo no Financeiro para este codigo, mas nenhum lancamento "
                       "correspondente foi encontrado no Razao Contabil.",
-    "SO_CONTABILIDADE": "Existe lancamento no Razao Contabil para este codigo, mas nenhum "
-                         "titulo correspondente foi encontrado no Financeiro.",
+    "SO_CONTABILIDADE": "existe lançamentos no razão contábil para este código, mas nenhum "
+                         "título correspondente foi encontrado no financeiro.",
     "DIVERGENTE_VALOR": "O codigo tem lancamentos nos dois lados, mas a soma dos valores nao coincide.",
 }
 
